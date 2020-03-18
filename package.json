@@ -1,0 +1,22 @@
+{
+  "name": "pagerip",
+  "version": "1.0.0",
+  "description": "Crawls a website and lists or downloads all resources",
+  "main": "pagerip.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+   "type": "git",
+   "url": "git+https://github.com/koga73/pagerip.git"
+  },
+  "bugs": {
+    "url": "https://github.com/koga73/pagerip/issues"
+  },
+  "homepage": "https://github.com/koga73/pagerip#readme",
+  "author": "AJ Savino",
+  "license": "MIT",
+  "dependencies": {
+    "fetch": "^1.1.0"
+  }
+}
