@@ -12,7 +12,11 @@ module.exports = (function(){
 		VERSION:"1.0.0",
 
 		THREADS:10,
-		DEFAULT_OUTPUT:"./output.txt", //If not specified
+		DEFAULT_ENCODING:"utf8",
+		DEFAULT_OUTPUT_PATH:"./output.txt", //If not specified
+		DEFAULT_DOWNLOAD_PATH:"./download/", //If not specified
+
+		//TODO: Determine protocol automatically from resource
 		DEFAULT_PROTOCOL:"https", //If not specified
 
 		//Crawl if we find a url without an extension or the extension matches
@@ -53,20 +57,27 @@ module.exports = (function(){
 	}
 
 	var _vars = {
-		output:_consts.DEFAULT_OUTPUT,
+		//Flags
+		outputPath:null,
+		downloadPath:null,
+		defaultProtocol:_consts.DEFAULT_PROTOCOL,
+
+		//URLs
 		rootUrls:[], //URLs specified by user
 		crawlQueue:[], //URLs to crawl
+		downloadQueue:[], //URLs to download
 		allUrls:[], //URLs found crawling
-		externalUrls:[],
+		externalUrls:[], //URLs pointing to non-root URL domains
 
+		//Private
 		_crawlQueueIndex:0,
+		_downloadQueueIndex:0,
 		_threads:new Array(_consts.THREADS)
 	};
 
 	var _methods = {
 		init:function(){
 			process.on('uncaughtException', _methods._handler_uncaught_exception);
-			process.stdin.on("data", _methods._handler_stdin_data);
 
 			//Parse args
 			var args = process.argv;
@@ -74,22 +85,54 @@ module.exports = (function(){
 			//Start at arg 2 to skip node.exe and pagerip.js
 			for (var i = 2; i < argsLen; i++){
 				var arg = args[i];
+				switch (arg){
+					case "-o": //Output path
+						arg = _methods._getArg(i + 1);
+						if (arg){
+							i++;
+							_vars.outputPath = arg;
+						} else {
+							_vars.outputPath = _consts.DEFAULT_OUTPUT_PATH;
+						}
+						break;
 
-				//If does not start with hyphen then treat as URL
-				if (!/^-/.test(arg)){
-					var baseUrl = _methods._getUrlBase(arg);
-					_vars.rootUrls.push(baseUrl);
-				}
+					case "-d": //Download path
+						arg = _methods._getArg(i + 1);
+						if (arg){
+							i++;
+							_vars.downloadPath = arg;
+						} else {
+							_vars.downloadPath = _consts.DEFAULT_DOWNLOAD_PATH;
+						}
+						break;
 
-				//Output
-				if (arg == "-o"){
-					i++;
-					_vars.output = args[i];
+					case "-p": //Protocol
+						arg = _methods._getArg(i + 1);
+						if (arg){
+							i++;
+							_vars.defaultProtocol = arg;
+						}
+						break;
+
+					default:
+						//If does not start with hyphen then treat as URL
+						arg = _methods._getArg(i);
+						if (arg){
+							var baseUrl = _methods._getUrlBase(arg);
+							_vars.rootUrls.push(baseUrl);
+						}
+						break;
 				}
 			}
 
+			//Make sure we have minimum parameters specified
 			var rootUrlsLen = _vars.rootUrls.length;
 			if (!rootUrlsLen){
+				_methods._displayCommands();
+				_methods.exit();
+				return;
+			}
+			if (!_vars.outputPath && !_vars.downloadPath){
 				_methods._displayCommands();
 				_methods.exit();
 				return;
@@ -109,7 +152,6 @@ module.exports = (function(){
 		},
 
 		destroy:function(){
-			process.stdin.removeListener("data", _methods._handler_stdin_data);
 			process.removeListener('uncaughtException', _methods._handler_uncaught_exception);
 		},
 
@@ -123,39 +165,36 @@ module.exports = (function(){
 			process.exit(0);
 		},
 
-		//Console input
-		_handler_stdin_data:function(data){
-			var input = data.toString().trim();
-			switch (input){
-				case "?":
-				default:
-					_methods._displayCommands();
-					break;
-			}
-		},
-
 		_displayCommands:function(){
 			console.log();
 			console.log(_consts.NAME + " " + _consts.VERSION);
-			console.log("Usage example: node ./pagerip.js https://www.example.com https://app.example.com -o output.txt");
+			console.log("Requires NodeJS 12+");
 			console.log();
+			console.log("node ./pagerip.js [path1] [path2] [path-n] [-o [output file path]] [-d [download path]] [-p [default protocol]]");
+			console.log();
+			console.log("Usage examples:");
+			console.log("    node ./pagerip.js https://www.example.com -o");
+			console.log("    node ./pagerip.js https://www.example.com -o ./output.txt");
+			console.log("    node ./pagerip.js https://www.example.com -d");
+			console.log("    node ./pagerip.js https://www.example.com -d ./download/");
+			console.log("    node ./pagerip.js https://www.example1.com https://www.example2.com -o ./output.txt -d ./download/ -p http");
+			console.log();
+			console.log("-o | output file path          | Default: ./output.txt");
+			console.log("-d | download while crawling   | Default: ./download/");
+			console.log("-p | default protocol          | Default: https");
 			console.log();
 		},
 
-		_getArg:function(key){
-			var index = process.argv.indexOf(key);
-			var next = process.argv[index + 1];
-			return index < 0 ? null : !next || next[0] === "-" ? true : next;
-		},
-
-		_handler_caught_exception:function(error, dontLog){
-			dontLog = dontLog === true;
-
-			if (error.isFatal === true){
-				_methods.handler_caught_fatal(error);
-			} else if (!dontLog){
-				console.warn(`CAUGHT ERROR:\n${error}`); //Recoverable
+		_getArg:function(argIndex){
+			if (argIndex >= process.argv.length){
+				return null;
 			}
+			var arg = process.argv[argIndex];
+			//If does not start with hyphen then return arg
+			if (!/^-/.test(arg)){
+				return arg;
+			}
+			return null;
 		},
 
 		_handler_uncaught_exception:function(error){
@@ -164,30 +203,62 @@ module.exports = (function(){
 		},
 
 		_crawlNext:function(){
+			//Check completion
 			if (_vars._crawlQueueIndex == _vars.crawlQueue.length){
-				_methods._complete();
-			}
-			for (var i = 0; i < _consts.THREADS; i++){
-				if (_vars._crawlQueueIndex == _vars.crawlQueue.length){
-					break;
+				if (_vars.downloadPath){
+					if (_vars._downloadQueueIndex == _vars.downloadQueue.length){
+						_methods._complete();
+						return;
+					}
+				} else {
+					_methods._complete();
+					return;
 				}
-				if (!_vars._threads[i]){
-					//console.log(_vars._crawlQueueIndex);
+			}
+			//Loop through threads and do something
+			for (var i = 0; i < _consts.THREADS; i++){
+				//Thread is busy, skip
+				if (_vars._threads[i]){
+					continue;
+				}
+				//We need to check for completion again since an eariler thread may not be complete but a later thread might be
+				if (_vars._crawlQueueIndex == _vars.crawlQueue.length){
+					if (_vars.downloadPath){
+						if (_vars._downloadQueueIndex < _vars.downloadQueue.length){
+							//console.log("_downloadQueueIndex:", _vars._downloadQueueIndex);
+							_vars._threads[i] = _methods._download(_vars.downloadQueue[_vars._downloadQueueIndex]);
+							_vars._downloadQueueIndex++;
+						}
+					}
+				} else {
+					//console.log("_crawlQueueIndex:", _vars._crawlQueueIndex);
+					_vars._threads[i] = _methods._crawl(_vars.crawlQueue[_vars._crawlQueueIndex]);
+					_vars._crawlQueueIndex++;
+				}
+				//Thread has work, await and recurse
+				if (_vars._threads[i]){
 					(async function(i){
-						_vars._threads[i] = _methods._crawl(_vars.crawlQueue[_vars._crawlQueueIndex]);
 						await _vars._threads[i];
+						//Clear to indicate thread is open
 						_vars._threads[i] = null;
 						//Recurse
 						_methods._crawlNext();
 					})(i);
-					_vars._crawlQueueIndex++;
 				}
 			}
 		},
 
 		_complete:function(){
+			_methods._writeOutputFile();
+			_methods.exit();
+		},
+
+		_writeOutputFile:function(){
+			if (!_vars.outputPath){
+				return;
+			}
 			//Note: Currently this writes everything to the file system at the end. However the buffer could overflow so its better to write to file system in chunks during runtime
-			console.log("Writing file", _vars.output);
+			console.log("Writing file", _vars.outputPath);
 
 			var fileContents = _vars.allUrls.reduce((str, urlArr, index) => {
 				var separator = new Array(_vars.rootUrls[index].length).fill("=").join("");
@@ -204,17 +275,24 @@ module.exports = (function(){
 				return str + url + "\n";
 			}, "") + "\n";
 
-			fs.writeFileSync(_vars.output, fileContents);
-
-			_methods.exit();
+			fs.writeFileSync(_vars.outputPath, fileContents);
 		},
 
+		_saveFile:function(url, contents){
+			//TODO: WRITE CODE TO PARSE URL INTO FILE PATH AND SAVE CONTENTS
+			console.log("SAVING FILE:", url);
+		},
+
+		//TODO: Add error handling
 		_crawl:function(url){
 			return new Promise(async (resolve, reject) => {
-				console.log("CRAWLING URL:", url);
+				if (_vars.downloadPath){
+					console.log("DOWNLOADING AND CRAWLING URL:", url);
+				} else {
+					console.log("CRAWLING URL:", url);
+				}
 
-				//Get response
-				var response = await _methods._fetchUrl(url);
+				var response = await _methods._download(url, true); //Suppress log
 
 				//Parse content-type
 				var contentType = null;
@@ -256,6 +334,24 @@ module.exports = (function(){
 				}
 
 				resolve();
+			});
+		},
+
+		_download:function(url, suppressLog){
+			suppressLog = suppressLog === true;
+			if (!suppressLog){
+				console.log("DOWNLOADING URL:", url);
+			}
+
+			return new Promise(async (resolve, reject) => {
+				//Get response
+				var response = await _methods._fetchUrl(url);
+				//Save if we have a download path
+				if (_vars.downloadPath){
+					_methods._saveFile(url, response.body);
+				}
+
+				resolve(response);
 			});
 		},
 
@@ -330,16 +426,20 @@ module.exports = (function(){
 			if (!urlExtension || (urlExtension && _consts.CRAWL_EXTENSIONS.indexOf(urlExtension) != -1)){
 				//HTML page found, add to crawl queue
 				_vars.crawlQueue.push(absoluteUrl);
+			} else if (_vars.downloadQueue){
+				_vars.downloadQueue.push(absoluteUrl);
 			}
 		},
 
-		_fetchUrl:function(url){
+		_fetchUrl:function(url, encoding){
+			encoding = encoding || _consts.DEFAULT_ENCODING;
+
 			return new Promise((resolve, reject) => {
 				fetchUrl(url, (error, meta, body) => {
 					var response = {
 						error,
 						meta,
-						body:body.toString("utf8")
+						body:body.toString(encoding)
 					};
 					if (error){
 						reject(response);
@@ -359,7 +459,7 @@ module.exports = (function(){
 				if (raw){
 					return `${match[1]}${match[3]}`
 				} else {
-					var protocol = match[2] || _consts.DEFAULT_PROTOCOL;
+					var protocol = match[2] || _vars.defaultProtocol;
 					return `${protocol}://${match[3]}`;
 				}
 			} else if (!raw){
