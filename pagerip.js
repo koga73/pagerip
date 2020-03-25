@@ -4,7 +4,8 @@
 //Requires NodeJS 12+
 
 const fs = require("fs");
-const fetchUrl = require("fetch").fetchUrl;
+const fsExtra = require("fs-extra");
+const fetch = require("node-fetch");
 
 module.exports = (function(){
 	const _consts = {
@@ -12,9 +13,10 @@ module.exports = (function(){
 		VERSION:"1.0.0",
 
 		THREADS:10,
-		DEFAULT_ENCODING:"utf8",
 		DEFAULT_OUTPUT_PATH:"./output.txt", //If not specified
 		DEFAULT_DOWNLOAD_PATH:"./download/", //If not specified
+		DEFAULT_PAGE:"index", //If not specified
+		DEFAULT_EXTENSION:".html", //If not specified
 
 		//TODO: Determine protocol automatically from resource
 		DEFAULT_PROTOCOL:"https", //If not specified
@@ -38,6 +40,7 @@ module.exports = (function(){
 		REGEX_URL_IS_ABSOLUTE:/^(([a-z0-9]+)?\:\/\/).+$/i,
 		REGEX_URL_ACTION:/^([a-z0-9]+\:)(?!\/\/)(.+)$/, //mailto:test@test.com, tel:5555555555
 		REGEX_URL_BASIC_AUTH:/^(([a-z0-9]+)?\:?\/\/)?(.+\:.+@)/i, //username:password@example.com
+		REGEX_URL_FULL:/^(([a-z0-9]+)\:\/\/)([^\/\s]+\.[^\/\s]+)(.+\/)?([^\.\s]*?(\..+?)?)([?#].*)?$/i, //Requires absolute URL
 
 		//Headers
 		REGEX_HEADER_CONTENT_TYPE:/^content-type$/i,
@@ -103,6 +106,10 @@ module.exports = (function(){
 							_vars.downloadPath = arg;
 						} else {
 							_vars.downloadPath = _consts.DEFAULT_DOWNLOAD_PATH;
+						}
+						//Make sure path ends with slash
+						if (!/\/$/.test(_vars.downloadPath)){
+							_vars.downloadPath += "/";
 						}
 						break;
 
@@ -198,8 +205,12 @@ module.exports = (function(){
 		},
 
 		_handler_uncaught_exception:function(error){
-			console.error(`UNCAUGHT FATAL ERROR:\n${error}`);
+			console.error("UNCAUGHT FATAL ERROR:\n", error);
 			process.exit(1); //Uncaught fatal error
+		},
+
+		_handler_caught_exception:function(error){
+			console.error("CAUGHT ERROR:\n", error);
 		},
 
 		_crawlNext:function(){
@@ -238,7 +249,11 @@ module.exports = (function(){
 				//Thread has work, await and recurse
 				if (_vars._threads[i]){
 					(async function(i){
-						await _vars._threads[i];
+						try {
+							await _vars._threads[i];
+						} catch (error){
+							_methods._handler_caught_exception(error);
+						}
 						//Clear to indicate thread is open
 						_vars._threads[i] = null;
 						//Recurse
@@ -279,32 +294,50 @@ module.exports = (function(){
 		},
 
 		_saveFile:function(url, contents){
-			//TODO: WRITE CODE TO PARSE URL INTO FILE PATH AND SAVE CONTENTS
-			console.log("SAVING FILE:", url);
+			var fullUrlMatch = _consts.REGEX_URL_FULL.exec(url);
+			if (!fullUrlMatch){
+				return;
+			}
+			var fullPath = `${_vars.downloadPath}${fullUrlMatch[3]}${fullUrlMatch[4] || ""}${fullUrlMatch[5] || "/"}`;
+			//Make sure we have a file name
+			if (!fullUrlMatch[5] || !/[a-z]/i.test(fullUrlMatch[5])){
+				fullPath += _consts.DEFAULT_PAGE;
+			}
+			//Make sure have a file extension
+			if (!(fullUrlMatch[6] && fullUrlMatch[6].length)){
+				fullPath += _consts.DEFAULT_EXTENSION;
+			}
+
+			fsExtra.outputFile(fullPath, contents);
+
+			//console.log(url);
+			console.log("SAVING FILE:", fullPath);
+			//console.log();
 		},
 
 		//TODO: Add error handling
 		_crawl:function(url){
 			return new Promise(async (resolve, reject) => {
-				if (_vars.downloadPath){
-					console.log("DOWNLOADING AND CRAWLING URL:", url);
-				} else {
-					console.log("CRAWLING URL:", url);
-				}
+				console.log("CRAWLING URL:", url);
 
-				var response = await _methods._download(url, true); //Suppress log
+				try {
+					var response = await _methods._download(url, true); //Suppress log
+				} catch (error){
+					reject(error);
+					return;
+				}
 
 				//Parse content-type
 				var contentType = null;
-				for (var header in response.meta.responseHeaders){
+				for (var header in response.headers){
 					if (_consts.REGEX_HEADER_CONTENT_TYPE.test(header)){
-						contentType = response.meta.responseHeaders[header];
+						contentType = response.headers[header];
 						break;
 					}
 				}
 
 				//Parse URLs
-				var body = response.body;
+				var body = response.body.toString();
 				body = body.replace(/&#34;/g, '"');
 				body = body.replace(/&#39;/g, "'");
 
@@ -345,7 +378,12 @@ module.exports = (function(){
 
 			return new Promise(async (resolve, reject) => {
 				//Get response
-				var response = await _methods._fetchUrl(url);
+				try {
+					var response = await _methods._fetchUrl(url);
+				} catch (error){
+					reject(error);
+					return;
+				}
 				//Save if we have a download path
 				if (_vars.downloadPath){
 					_methods._saveFile(url, response.body);
@@ -431,22 +469,19 @@ module.exports = (function(){
 			}
 		},
 
-		_fetchUrl:function(url, encoding){
-			encoding = encoding || _consts.DEFAULT_ENCODING;
-
+		_fetchUrl:function(url){
 			return new Promise((resolve, reject) => {
-				fetchUrl(url, (error, meta, body) => {
-					var response = {
-						error,
-						meta,
-						body:body.toString(encoding)
-					};
-					if (error){
-						reject(response);
-					} else {
-						resolve(response);
-					}
-				});
+				fetch(url)
+					.then((response) => {
+						var headers = response.headers.raw();
+						response.buffer().then((buf) => {
+							resolve({
+								headers:headers,
+								body:buf
+							});
+						});
+					})
+					.catch(reject);
 			});
 		},
 
