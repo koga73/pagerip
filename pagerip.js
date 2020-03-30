@@ -1,20 +1,13 @@
-#!/usr/bin/env node
-
-//By: AJ Savino
+//AJ Savino
 //Requires NodeJS 12+
 
-const fs = require("fs");
-const fsExtra = require("fs-extra");
 const fetch = require("node-fetch");
 
-module.exports = (function(){
-	const _consts = {
-		NAME:"PageRip",
-		VERSION:"1.0.0",
+module.exports = function(params){
+	var _instance = null;
 
+	const _consts = {
 		THREADS:10,
-		DEFAULT_OUTPUT_PATH:"./output.txt", //If not specified
-		DEFAULT_DOWNLOAD_PATH:"./download/", //If not specified
 		DEFAULT_PAGE:"index", //If not specified
 		DEFAULT_EXTENSION:".html", //If not specified
 
@@ -57,167 +50,62 @@ module.exports = (function(){
 		REGEX_SOURCE_SET:/<source[\s\S]+?srcset=['"](.*?)['"]/ig,
 		REGEX_CSS_IMPORT:/@import[\s\S]+?['"](.*?)['"]/ig,
 		REGEX_CSS_RESOURCE:/url\(['"]?(.*?)['"]?\)/ig
-	}
+	};
 
 	var _vars = {
-		//Flags
-		outputPath:null,
-		downloadPath:null,
+		addUrlCallback:null,
+		downloadCallback:null,
+		completeCallback:null,
+
 		defaultProtocol:_consts.DEFAULT_PROTOCOL,
+		isRunning:false,
 
 		//URLs
 		rootUrls:[], //URLs specified by user
-		crawlQueue:[], //URLs to crawl
-		downloadQueue:[], //URLs to download
 		allUrls:[], //URLs found crawling
 		externalUrls:[], //URLs pointing to non-root URL domains
 
 		//Private
+		_crawlQueue:[], //URLs to crawl
 		_crawlQueueIndex:0,
+		_downloadQueue:[], //URLs to download
 		_downloadQueueIndex:0,
 		_threads:new Array(_consts.THREADS)
 	};
 
 	var _methods = {
-		init:function(){
-			process.on('uncaughtException', _methods._handler_uncaught_exception);
+		addUrl:function(absoluteUrl){
+			var baseUrl = _methods._getUrlBase(absoluteUrl);
+			var baseUrlNoAuth = _methods._trimBasicAuth(baseUrl);
+			var absoluteUrlNoAuth = _methods._trimBasicAuth(absoluteUrl);
+			_instance.rootUrls.push(baseUrlNoAuth);
+			_instance.allUrls.push(new Array());
 
-			//Parse args
-			var args = process.argv;
-			var argsLen = args.length;
-			//Start at arg 2 to skip node.exe and pagerip.js
-			for (var i = 2; i < argsLen; i++){
-				var arg = args[i];
-				switch (arg){
-					case "-o": //Output path
-						arg = _methods._getArg(i + 1);
-						if (arg){
-							i++;
-							_vars.outputPath = arg;
-						} else {
-							_vars.outputPath = _consts.DEFAULT_OUTPUT_PATH;
-						}
-						break;
+			_methods._addUrl(absoluteUrlNoAuth, baseUrlNoAuth, null);
+		},
 
-					case "-d": //Download path
-						arg = _methods._getArg(i + 1);
-						if (arg){
-							i++;
-							_vars.downloadPath = arg;
-						} else {
-							_vars.downloadPath = _consts.DEFAULT_DOWNLOAD_PATH;
-						}
-						//Make sure path ends with slash
-						if (!/\/$/.test(_vars.downloadPath)){
-							_vars.downloadPath += "/";
-						}
-						break;
-
-					case "-p": //Protocol
-						arg = _methods._getArg(i + 1);
-						if (arg){
-							i++;
-							_vars.defaultProtocol = arg;
-						}
-						break;
-
-					default:
-						//If does not start with hyphen then treat as URL
-						arg = _methods._getArg(i);
-						if (arg){
-							var baseUrl = _methods._getUrlBase(arg);
-							_vars.rootUrls.push(baseUrl);
-						}
-						break;
-				}
-			}
-
+		start:function(){
 			//Make sure we have minimum parameters specified
-			var rootUrlsLen = _vars.rootUrls.length;
-			if (!rootUrlsLen){
-				_methods._displayCommands();
-				_methods.exit();
-				return;
-			}
-			if (!_vars.outputPath && !_vars.downloadPath){
-				_methods._displayCommands();
-				_methods.exit();
-				return;
+			if (!_instance.rootUrls.length){
+				throw new Error("Must specify at least one URL to crawl");
 			}
 
-			//Init allUrls 2d array
-			for (var i = 0; i < rootUrlsLen; i++){
-				var rootUrl = _vars.rootUrls[i];
-				_vars.rootUrls[i] = _methods._trimBasicAuth(rootUrl);
-
-				_vars.allUrls.push(new Array());
-				_methods._addUrl(rootUrl, rootUrl, null); //Should first param be arg ?
-			}
-
-			//Crawl URLs
+			_instance.isRunning = true;
 			_methods._crawlNext();
 		},
 
-		destroy:function(){
-			process.removeListener('uncaughtException', _methods._handler_uncaught_exception);
-		},
-
-		reset:function(){
-			_methods.destroy();
-			_methods.init();
-		},
-
-		exit:function(){
-			_methods.destroy();
-			process.exit(0);
-		},
-
-		_displayCommands:function(){
-			console.log();
-			console.log(_consts.NAME + " " + _consts.VERSION);
-			console.log("Requires NodeJS 12+");
-			console.log();
-			console.log("node ./pagerip.js [path1] [path2] [path-n] [-o [output file path]] [-d [download path]] [-p [default protocol]]");
-			console.log();
-			console.log("Usage examples:");
-			console.log("    node ./pagerip.js https://www.example.com -o");
-			console.log("    node ./pagerip.js https://www.example.com -o ./output.txt");
-			console.log("    node ./pagerip.js https://www.example.com -d");
-			console.log("    node ./pagerip.js https://www.example.com -d ./download/");
-			console.log("    node ./pagerip.js https://www.example1.com https://www.example2.com -o ./output.txt -d ./download/ -p http");
-			console.log();
-			console.log("-o | output file path          | Default: ./output.txt");
-			console.log("-d | download while crawling   | Default: ./download/");
-			console.log("-p | default protocol          | Default: https");
-			console.log();
-		},
-
-		_getArg:function(argIndex){
-			if (argIndex >= process.argv.length){
-				return null;
-			}
-			var arg = process.argv[argIndex];
-			//If does not start with hyphen then return arg
-			if (!/^-/.test(arg)){
-				return arg;
-			}
-			return null;
-		},
-
-		_handler_uncaught_exception:function(error){
-			console.error("UNCAUGHT FATAL ERROR:\n", error);
-			process.exit(1); //Uncaught fatal error
-		},
-
-		_handler_caught_exception:function(error){
-			console.error("CAUGHT ERROR:\n", error);
+		cancel:function(){
+			_instance.isRunning = false;
 		},
 
 		_crawlNext:function(){
+			if (!_instance.isRunning){
+				return;
+			}
 			//Check completion
-			if (_vars._crawlQueueIndex == _vars.crawlQueue.length){
-				if (_vars.downloadPath){
-					if (_vars._downloadQueueIndex == _vars.downloadQueue.length){
+			if (_vars._crawlQueueIndex == _vars._crawlQueue.length){
+				if (_instance.downloadCallback){
+					if (_vars._downloadQueueIndex == _vars._downloadQueue.length){
 						_methods._complete();
 						return;
 					}
@@ -226,6 +114,7 @@ module.exports = (function(){
 					return;
 				}
 			}
+
 			//Loop through threads and do something
 			for (var i = 0; i < _consts.THREADS; i++){
 				//Thread is busy, skip
@@ -233,17 +122,17 @@ module.exports = (function(){
 					continue;
 				}
 				//We need to check for completion again since an eariler thread may not be complete but a later thread might be
-				if (_vars._crawlQueueIndex == _vars.crawlQueue.length){
-					if (_vars.downloadPath){
-						if (_vars._downloadQueueIndex < _vars.downloadQueue.length){
+				if (_vars._crawlQueueIndex == _vars._crawlQueue.length){
+					if (_instance.downloadCallback){
+						if (_vars._downloadQueueIndex < _vars._downloadQueue.length){
 							//console.log("_downloadQueueIndex:", _vars._downloadQueueIndex);
-							_vars._threads[i] = _methods._download(_vars.downloadQueue[_vars._downloadQueueIndex]);
+							_vars._threads[i] = _methods._download(_vars._downloadQueue[_vars._downloadQueueIndex]);
 							_vars._downloadQueueIndex++;
 						}
 					}
 				} else {
 					//console.log("_crawlQueueIndex:", _vars._crawlQueueIndex);
-					_vars._threads[i] = _methods._crawl(_vars.crawlQueue[_vars._crawlQueueIndex]);
+					_vars._threads[i] = _methods._crawl(_vars._crawlQueue[_vars._crawlQueueIndex]);
 					_vars._crawlQueueIndex++;
 				}
 				//Thread has work, await and recurse
@@ -264,64 +153,20 @@ module.exports = (function(){
 		},
 
 		_complete:function(){
-			_methods._writeOutputFile();
-			_methods.exit();
-		},
+			_instance.isRunning = false;
 
-		_writeOutputFile:function(){
-			if (!_vars.outputPath){
-				return;
+			if (_instance.completeCallback){
+				_instance.completeCallback(_instance.rootUrls, _instance.allUrls, _instance.externalUrls);
 			}
-			//Note: Currently this writes everything to the file system at the end. However the buffer could overflow so its better to write to file system in chunks during runtime
-			console.log("Writing file", _vars.outputPath);
-
-			var fileContents = _vars.allUrls.reduce((str, urlArr, index) => {
-				var separator = new Array(_vars.rootUrls[index].length).fill("=").join("");
-				urlArr.sort();
-				return str + `\n${separator}\n` + _vars.rootUrls[index] + `\n${separator}\n\n` + urlArr.reduce((str, url) => {
-					return str + url + "\n";
-				}, "") + "\n";
-			}, "");
-
-			_vars.externalUrls.sort();
-			var externalCopy = "EXTERNAL URLS"
-			var separator = new Array(externalCopy.length).fill("=").join("");
-			fileContents += `\n${separator}\n` + externalCopy + `\n${separator}\n\n` + _vars.externalUrls.reduce((str, url) => {
-				return str + url + "\n";
-			}, "") + "\n";
-
-			fs.writeFileSync(_vars.outputPath, fileContents);
-		},
-
-		_saveFile:function(url, contents){
-			var fullUrlMatch = _consts.REGEX_URL_FULL.exec(url);
-			if (!fullUrlMatch){
-				return;
-			}
-			var fullPath = `${_vars.downloadPath}${fullUrlMatch[3]}${fullUrlMatch[4] || ""}${fullUrlMatch[5] || "/"}`;
-			//Make sure we have a file name
-			if (!fullUrlMatch[5] || !/[a-z]/i.test(fullUrlMatch[5])){
-				fullPath += _consts.DEFAULT_PAGE;
-			}
-			//Make sure have a file extension
-			if (!(fullUrlMatch[6] && fullUrlMatch[6].length)){
-				fullPath += _consts.DEFAULT_EXTENSION;
-			}
-
-			fsExtra.outputFile(fullPath, contents);
-
-			//console.log(url);
-			console.log("SAVING FILE:", fullPath);
-			//console.log();
 		},
 
 		//TODO: Add error handling
 		_crawl:function(url){
 			return new Promise(async (resolve, reject) => {
-				console.log("CRAWLING URL:", url);
+				//console.log("CRAWLING URL:", url);
 
 				try {
-					var response = await _methods._download(url, true); //Suppress log
+					var response = await _methods._download(url);
 				} catch (error){
 					reject(error);
 					return;
@@ -370,12 +215,7 @@ module.exports = (function(){
 			});
 		},
 
-		_download:function(url, suppressLog){
-			suppressLog = suppressLog === true;
-			if (!suppressLog){
-				console.log("DOWNLOADING URL:", url);
-			}
-
+		_download:function(url){
 			return new Promise(async (resolve, reject) => {
 				//Get response
 				try {
@@ -385,8 +225,22 @@ module.exports = (function(){
 					return;
 				}
 				//Save if we have a download path
-				if (_vars.downloadPath){
-					_methods._saveFile(url, response.body);
+				if (_instance.downloadCallback){
+					var fullUrlMatch = _consts.REGEX_URL_FULL.exec(url);
+					if (!fullUrlMatch){
+						return;
+					}
+					var filePath = `${fullUrlMatch[3]}${fullUrlMatch[4] || ""}${fullUrlMatch[5] || "/"}`;
+					//Make sure we have a file name
+					if (!fullUrlMatch[5] || !/[a-z]/i.test(fullUrlMatch[5])){
+						filePath += _consts.DEFAULT_PAGE;
+					}
+					//Make sure have a file extension
+					if (!(fullUrlMatch[6] && fullUrlMatch[6].length)){
+						filePath += _consts.DEFAULT_EXTENSION;
+					}
+
+					_instance.downloadCallback(url, filePath, response.body);
 				}
 
 				resolve(response);
@@ -407,20 +261,26 @@ module.exports = (function(){
 		},
 
 		_addUrl:function(url, baseUrl, currentUrl){
-			var rootUrlsLen = _vars.rootUrls.length;
+			var rootUrlsLen = _instance.rootUrls.length;
 
 			//Actions like mailto: and tel:
 			if (_consts.REGEX_URL_ACTION.test(url)){
 				for (var i = 0; i < rootUrlsLen; i++){
-					var rootUrl = _vars.rootUrls[i];
+					var rootUrl = _instance.rootUrls[i];
 					if (baseUrl == rootUrl){
 
-						if (_vars.allUrls[i].indexOf(url) != -1){
+						if (_instance.allUrls[i].indexOf(url) != -1){
 							return; //Duplicate
 						}
-						console.log("ADDING:", url);
+						if (_instance.addUrlCallback){
+							_instance.addUrlCallback(url, {
+								isAction:true,
+								isExternal:false,
+								isCrawlable:false
+							});
+						}
 
-						_vars.allUrls[i].push(url);
+						_instance.allUrls[i].push(url);
 
 						break;
 					}
@@ -435,24 +295,33 @@ module.exports = (function(){
 			}
 
 			//Add URL
+			var didAdd = false;
 			for (var i = 0; i < rootUrlsLen; i++){
-				var rootUrl = _vars.rootUrls[i];
+				var rootUrl = _instance.rootUrls[i];
 				if (_methods._trimBasicAuth(_methods._getUrlBase(absoluteUrl)) == rootUrl){
 
-					if (_vars.allUrls[i].indexOf(absoluteUrl) != -1){
+					if (_instance.allUrls[i].indexOf(absoluteUrl) != -1){
 						return; //Duplicate
 					}
-					console.log("ADDING:", url);
+					didAdd = true;
 
-					_vars.allUrls[i].push(absoluteUrl);
+					_instance.allUrls[i].push(absoluteUrl);
 
 					break;
 				}
 			}
 			//Make sure we stay on our domain
 			if (i == rootUrlsLen){
-				if (_vars.externalUrls.indexOf(url) == -1){
-					_vars.externalUrls.push(url);
+				if (_instance.externalUrls.indexOf(url) == -1){
+					_instance.externalUrls.push(url);
+
+					if (_instance.addUrlCallback){
+						_instance.addUrlCallback(url, {
+							isAction:false,
+							isExternal:true,
+							isCrawlable:false
+						});
+					}
 				}
 				return;
 			}
@@ -461,11 +330,22 @@ module.exports = (function(){
 			if (urlExtension){
 				urlExtension = urlExtension[1];
 			}
+
+			var isCrawlable = false;
 			if (!urlExtension || (urlExtension && _consts.CRAWL_EXTENSIONS.indexOf(urlExtension) != -1)){
 				//HTML page found, add to crawl queue
-				_vars.crawlQueue.push(absoluteUrl);
-			} else if (_vars.downloadQueue){
-				_vars.downloadQueue.push(absoluteUrl);
+				_vars._crawlQueue.push(absoluteUrl);
+				isCrawlable = true;
+			} else if (_vars._downloadQueue){
+				_vars._downloadQueue.push(absoluteUrl);
+			}
+
+			if (_instance.addUrlCallback && didAdd){
+				_instance.addUrlCallback(url, {
+					isAction:false,
+					isExternal:false,
+					isCrawlable:isCrawlable
+				});
 			}
 		},
 
@@ -494,7 +374,7 @@ module.exports = (function(){
 				if (raw){
 					return `${match[1]}${match[3]}`
 				} else {
-					var protocol = match[2] || _vars.defaultProtocol;
+					var protocol = match[2] || _instance.defaultProtocol;
 					return `${protocol}://${match[3]}`;
 				}
 			} else if (!raw){
@@ -554,11 +434,25 @@ module.exports = (function(){
 			}
 		}
 	};
-	_methods.init();
 
-	return {
-		init:_methods.init,
-		destroy:_methods.destroy,
-		reset:_methods.reset
+	_instance = {
+		addUrlCallback:_vars.addUrlCallback,
+		downloadCallback:_vars.downloadCallback,
+		completeCallback:_vars.completeCallback,
+
+		defaultProtocol:_vars.defaultProtocol,
+
+		//URLs
+		rootUrls:_vars.rootUrls,
+		allUrls:_vars.allUrls,
+		externalUrls:_vars.externalUrls,
+
+		addUrl:_methods.addUrl,
+		start:_methods.start,
+		cancel:_methods.cancel
 	};
-})();
+	for (var param in params){
+		_instance[param] = params[param];
+	}
+	return _instance;
+};
