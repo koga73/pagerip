@@ -8,22 +8,22 @@ module.exports = function(params){
 
 	const _consts = {
 		THREADS:10,
-		DEFAULT_PAGE:"index", //If not specified
-		DEFAULT_EXTENSION:".html", //If not specified
 
-		//TODO: Determine protocol automatically from resource
-		DEFAULT_PROTOCOL:"https", //If not specified
+		//If not specified
+		DEFAULT_PAGE:"index",
+		DEFAULT_EXTENSION:".html",
+		DEFAULT_PROTOCOL:"https", //TODO: Determine protocol automatically from resource?
 
 		//Crawl if we find a url without an extension or the extension matches
-		CRAWL_EXTENSIONS:[
+		DEFAULT_CRAWL_EXTENSIONS:[
 			"html",
+			"css",
 			"php",
 			"asp",
 			"aspx",
 			"cshtml",
 			"jsp",
-			"cgi",
-			"css"
+			"cgi"
 		],
 
 		//URL
@@ -58,6 +58,7 @@ module.exports = function(params){
 		completeCallback:null,
 
 		defaultProtocol:_consts.DEFAULT_PROTOCOL,
+		crawlExtensions:_consts.DEFAULT_CRAWL_EXTENSIONS,
 		isRunning:false,
 
 		//URLs
@@ -332,7 +333,7 @@ module.exports = function(params){
 			}
 
 			var isCrawlable = false;
-			if (!urlExtension || (urlExtension && _consts.CRAWL_EXTENSIONS.indexOf(urlExtension) != -1)){
+			if (!urlExtension || (urlExtension && _instance.crawlExtensions.indexOf(urlExtension) != -1)){
 				//HTML page found, add to crawl queue
 				_vars._crawlQueue.push(absoluteUrl);
 				isCrawlable = true;
@@ -441,6 +442,7 @@ module.exports = function(params){
 		completeCallback:_vars.completeCallback,
 
 		defaultProtocol:_vars.defaultProtocol,
+		crawlExtensions:_vars.crawlExtensions,
 
 		//URLs
 		rootUrls:_vars.rootUrls,

@@ -77,6 +77,14 @@ module.exports = (function(params){
 						}
 						break;
 
+					case "-c": //Crawl extensions
+						arg = _methods._getArg(i + 1);
+						if (arg){
+							i++;
+							pagerip.crawlExtensions = arg.split(',');
+						}
+						break;
+
 					default:
 						//If does not start with hyphen then treat as URL
 						arg = _methods._getArg(i);
@@ -114,18 +122,19 @@ module.exports = (function(params){
 			console.log(_consts.NAME + " " + _consts.VERSION);
 			console.log("Requires NodeJS 12+");
 			console.log();
-			console.log("node ./pagerip-cli.js [path1] [path2] [path-n] [-o [output file path]] [-d [download path]] [-p [default protocol]]");
+			console.log("node ./pagerip-cli.js [path1] [path2] [path-n] [-o [output file path]] [-d [download path]] [-p [default protocol]] [-c [crawl extensions]]");
 			console.log();
 			console.log("Usage examples:");
 			console.log("    node ./pagerip.js https://www.example.com -o");
 			console.log("    node ./pagerip.js https://www.example.com -o ./output.txt");
 			console.log("    node ./pagerip.js https://www.example.com -d");
 			console.log("    node ./pagerip.js https://www.example.com -d ./download/");
-			console.log("    node ./pagerip.js https://www.example1.com https://www.example2.com -o ./output.txt -d ./download/ -p http");
+			console.log("    node ./pagerip.js https://www.example1.com https://www.example2.com -o ./output.txt -d ./download/ -p http -c html,css");
 			console.log();
-			console.log("-o | output file path          | Default: ./output.txt");
-			console.log("-d | download while crawling   | Default: ./download/");
-			console.log("-p | default protocol          | Default: https");
+			console.log("-o | output file path                   | Default: ./output.txt");
+			console.log("-d | download while crawling            | Default: ./download/");
+			console.log("-p | default protocol if undefined      | Default: https");
+			console.log("-c | crawl url matching extensions      | Default: html,css,php,asp,aspx,cshtml,jsp,cgi");
 			console.log();
 		},
 
