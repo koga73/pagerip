@@ -31,7 +31,7 @@ module.exports = function(params){
 		REGEX_URL_CURRENT:/^[a-z0-9]+\:\/\/(([^\/]+)(.+\/)?)/i, //Requires absolute URL
 		REGEX_URL_EXTENSION:/^[a-z0-9]+\:\/\/.+\/.+\.([^\.]+?)([?#].*)?$/i, //Requires absolute URL
 		REGEX_URL_IS_ABSOLUTE:/^(([a-z0-9]+)?\:\/\/).+$/i,
-		REGEX_URL_ACTION:/^([a-z0-9]+\:)(?!\/\/)(.+)$/, //mailto:test@test.com, tel:5555555555
+		REGEX_URL_ACTION:/^([a-z0-9]+\:)(?!\/\/)([^'"]+)$/, //mailto:test@test.com, tel:5555555555
 		REGEX_URL_BASIC_AUTH:/^(([a-z0-9]+)?\:?\/\/)?(.+\:.+@)/i, //username:password@example.com
 		REGEX_URL_FULL:/^(([a-z0-9]+)\:\/\/)([^\/\s]+\.[^\/\s]+)(.+\/)?([^\.\s]*?(\..+?)?)([?#].*)?$/i, //Requires absolute URL
 
@@ -43,13 +43,13 @@ module.exports = function(params){
 		REGEX_MIME_CSS:/^text\/css\b/i,
 
 		//Source parsing
-		REGEX_LINK:/<a[\s\S]+?href=['"](.*?)['"]/ig,
-		REGEX_STYLE:/<link[\s\S]+?href=['"](.*?)['"]/ig,
-		REGEX_SCRIPT:/<script[\s\S]+?src=['"](.*?)['"]/ig,
-		REGEX_IMG:/<img[\s\S]+?src=['"](.*?)['"]/ig,
-		REGEX_SOURCE_SET:/<source[\s\S]+?srcset=['"](.*?)['"]/ig,
-		REGEX_CSS_IMPORT:/@import[\s\S]+?['"](.*?)['"]/ig,
-		REGEX_CSS_RESOURCE:/url\(['"]?(.*?)['"]?\)/ig
+		REGEX_LINK:/<a[\s\S]+?href=['"]([^'"]*?)['"]/ig,
+		REGEX_STYLE:/<link[\s\S]+?href=['"]([^'"]*?)['"]/ig,
+		REGEX_SCRIPT:/<script[\s\S]+?src=['"]([^'"]*?)['"]/ig,
+		REGEX_IMG:/<img[\s\S]+?src=['"]((?!data:)[^'"]*?)['"]/ig,
+		REGEX_SOURCE_SET:/<source[\s\S]+?srcset=['"]([^'"]*?)['"]/ig,
+		REGEX_CSS_IMPORT:/@import[\s\S]+?['"]([^'"]*?)['"]/ig,
+		REGEX_CSS_RESOURCE:/url\((?!data:)['"]?([^'"]*?)['"]?\)/ig
 	};
 
 	var _vars = {
