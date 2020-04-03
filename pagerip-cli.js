@@ -140,7 +140,7 @@ module.exports = (function(params){
 			console.log("-d | download while crawling            | Default: ./download/");
 			console.log("-p | default protocol if undefined      | Default: https");
 			console.log("-c | crawl url matching extensions      | Default: html,css,php,asp,aspx,cshtml,jsp,cgi");
-			console.log("-i | ignore certificate errors      	 | Default: false");
+			console.log("-i | ignore certificate errors          | Default: false");
 			console.log();
 		},
 

@@ -16,5 +16,5 @@ Usage examples:
 -d | download while crawling            | Default: ./download/
 -p | default protocol if undefined      | Default: https
 -c | crawl url matching extensions      | Default: html,css,php,asp,aspx,cshtml,jsp,cgi
--i | ignore certificate errors      	 | Default: false
+-i | ignore certificate errors          | Default: false
 ```
