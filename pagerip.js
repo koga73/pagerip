@@ -28,10 +28,10 @@ module.exports = function(params){
 
 		//URL
 		REGEX_URL_BASE:/^(([a-z0-9]+)?\:?\/\/)?([^\/\s]+\.[^\/\s]+).*$/i,
-		REGEX_URL_CURRENT:/^[a-z0-9]+\:\/\/(([^\/]+)(.+\/)?)/i, //Requires absolute URL
+		REGEX_URL_CURRENT:/^[a-z0-9]+\:\/\/(([^\/\s]+)(.+\/)?)/i, //Requires absolute URL
 		REGEX_URL_EXTENSION:/^[a-z0-9]+\:\/\/.+\/.+\.([^\.]+?)([?#].*)?$/i, //Requires absolute URL
 		REGEX_URL_IS_ABSOLUTE:/^(([a-z0-9]+)?\:\/\/).+$/i,
-		REGEX_URL_ACTION:/^([a-z0-9]+\:)(?!\/\/)([^'"]+)$/, //mailto:test@test.com, tel:5555555555
+		REGEX_URL_ACTION:/^([a-z0-9]+\:)(?!\/\/)([^'"\s]+)$/i, //mailto:test@test.com, tel:5555555555
 		REGEX_URL_BASIC_AUTH:/^(([a-z0-9]+)?\:?\/\/)?(.+\:.+@)/i, //username:password@example.com
 		REGEX_URL_FULL:/^(([a-z0-9]+)\:\/\/)([^\/\s]+\.[^\/\s]+)(.+\/)?([^\.\s]*?(\..+?)?)([?#].*)?$/i, //Requires absolute URL
 
@@ -47,15 +47,18 @@ module.exports = function(params){
 		REGEX_STYLE:/<link[\s\S]+?href=['"]([^'"]*?)['"]/ig,
 		REGEX_SCRIPT:/<script[\s\S]+?src=['"]([^'"]*?)['"]/ig,
 		REGEX_IMG:/<img[\s\S]+?src=['"]((?!data:)[^'"]*?)['"]/ig,
-		REGEX_SOURCE_SET:/<source[\s\S]+?srcset=['"]([^'"]*?)['"]/ig,
+		REGEX_SOURCE_SET:/<source[\s\S]+?srcset=['"]((?!data:)[^'"]*?)['"]/ig,
 		REGEX_CSS_IMPORT:/@import[\s\S]+?['"]([^'"]*?)['"]/ig,
 		REGEX_CSS_RESOURCE:/url\((?!data:)['"]?([^'"]*?)['"]?\)/ig
 	};
 
 	var _vars = {
+		debug:false,
+
 		addUrlCallback:null,
 		downloadCallback:null,
 		completeCallback:null,
+		errorCallback:null,
 
 		defaultProtocol:_consts.DEFAULT_PROTOCOL,
 		crawlExtensions:_consts.DEFAULT_CRAWL_EXTENSIONS,
@@ -97,6 +100,10 @@ module.exports = function(params){
 
 		cancel:function(){
 			_instance.isRunning = false;
+		},
+
+		ignoreCertificates:function(){
+			process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 		},
 
 		_crawlNext:function(){
@@ -142,7 +149,9 @@ module.exports = function(params){
 						try {
 							await _vars._threads[i];
 						} catch (error){
-							_methods._handler_caught_exception(error);
+							if (_instance.errorCallback){
+								_instance.errorCallback(error);
+							}
 						}
 						//Clear to indicate thread is open
 						_vars._threads[i] = null;
@@ -437,9 +446,12 @@ module.exports = function(params){
 	};
 
 	_instance = {
+		debug:_vars.debug,
+
 		addUrlCallback:_vars.addUrlCallback,
 		downloadCallback:_vars.downloadCallback,
 		completeCallback:_vars.completeCallback,
+		errorCallback:_vars.errorCallback,
 
 		defaultProtocol:_vars.defaultProtocol,
 		crawlExtensions:_vars.crawlExtensions,
@@ -451,10 +463,17 @@ module.exports = function(params){
 
 		addUrl:_methods.addUrl,
 		start:_methods.start,
-		cancel:_methods.cancel
+		cancel:_methods.cancel,
+		ignoreCertificates:_methods.ignoreCertificates
 	};
 	for (var param in params){
 		_instance[param] = params[param];
+	}
+	//Expose private proerties for unit tests and debug
+	if (_instance.debug){
+		_instance._consts = _consts;
+		_instance._vars = _vars;
+		_instance._methods = _methods;
 	}
 	return _instance;
 };
