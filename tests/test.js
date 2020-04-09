@@ -192,6 +192,8 @@ describe("--- REGEX SOURCE PARSING ---\n", function(){
 		expect(regex.test("<img src='#'/>")).equal(false);
 		regex.lastIndex = 0; //reset
 		expect(regex.test("<source srcset='#'/>")).equal(false);
+		regex.lastIndex = 0; //reset
+		expect(regex.test("<a class='test' href='{{test}}'></a>")).equal(false);
 	});
 
 	it("REGEX_STYLE", function(){
@@ -218,6 +220,8 @@ describe("--- REGEX SOURCE PARSING ---\n", function(){
 		expect(regex.test("<img src='#'/>")).equal(false);
 		regex.lastIndex = 0; //reset
 		expect(regex.test("<source srcset='#'/>")).equal(false);
+		regex.lastIndex = 0; //reset
+		expect(regex.test("<link href='{{test}}' rel='stylesheet'/>")).equal(false);
 	});
 
 	it("REGEX_SCRIPT", function(){
@@ -244,6 +248,8 @@ describe("--- REGEX SOURCE PARSING ---\n", function(){
 		expect(regex.test("<img src='#'/>")).equal(false);
 		regex.lastIndex = 0; //reset
 		expect(regex.test("<source srcset='#'/>")).equal(false);
+		regex.lastIndex = 0; //reset
+		expect(regex.test("<script src='{{test}}' id='test'></script>")).equal(false);
 	});
 
 	it("REGEX_IMG", function(){
@@ -272,6 +278,8 @@ describe("--- REGEX SOURCE PARSING ---\n", function(){
 		expect(regex.test("<link href='#'/>")).equal(false);
 		regex.lastIndex = 0; //reset
 		expect(regex.test("<source srcset='#'/>")).equal(false);
+		regex.lastIndex = 0; //reset
+		expect(regex.test("<img src='{{test}}' alt='test'/>")).equal(false);
 	});
 
 	it("REGEX_SOURCE_SET", function(){
@@ -300,6 +308,8 @@ describe("--- REGEX SOURCE PARSING ---\n", function(){
 		expect(regex.test("<a href='#'></a>")).equal(false);
 		regex.lastIndex = 0; //reset
 		expect(regex.test("<link href='#'/>")).equal(false);
+		regex.lastIndex = 0; //reset
+		expect(regex.test("<source srcset='{{test}}' class='test'/>")).equal(false);
 	});
 
 	it("REGEX_CSS_IMPORT", function(){

@@ -7,7 +7,7 @@ module.exports = function(params){
 	var _instance = null;
 
 	const _consts = {
-		THREADS:10,
+		DEFAULT_THREADS:10,
 
 		//If not specified
 		DEFAULT_PAGE:"index",
@@ -43,19 +43,21 @@ module.exports = function(params){
 		REGEX_MIME_CSS:/^text\/css\b/i,
 
 		//Source parsing
-		REGEX_LINK:/<a[\s\S]+?href=['"]([^'"]*?)['"]/ig,
-		REGEX_STYLE:/<link[\s\S]+?href=['"]([^'"]*?)['"]/ig,
-		REGEX_SCRIPT:/<script[\s\S]+?src=['"]([^'"]*?)['"]/ig,
-		REGEX_IMG:/<img[\s\S]+?src=['"]((?!data:)[^'"]*?)['"]/ig,
-		REGEX_SOURCE_SET:/<source[\s\S]+?srcset=['"]((?!data:)[^'"]*?)['"]/ig,
-		REGEX_CSS_IMPORT:/@import[\s\S]+?['"]([^'"]*?)['"]/ig,
-		REGEX_CSS_RESOURCE:/url\((?!data:)['"]?([^'"]*?)['"]?\)/ig
+		REGEX_LINK:/<a[^>]+?href=['"]([^'"{}]*?)['"]/ig,
+		REGEX_STYLE:/<link[^>]+?href=['"]([^'"{}]*?)['"]/ig,
+		REGEX_SCRIPT:/<script[^>]+?src=['"]([^'"{}]*?)['"]/ig,
+		REGEX_IMG:/<img[^>]+?src=['"]((?!data:)[^'"{}]*?)['"]/ig,
+		REGEX_SOURCE_SET:/<source[^>]+?srcset=['"]((?!data:)[^'"{}]*?)['"]/ig,
+		REGEX_CSS_IMPORT:/@import[\s\S]+?['"]([^'"{}]*?)['"]/ig,
+		REGEX_CSS_RESOURCE:/url\((?!data:)['"]?([^'"{}]*?)['"]?\)/ig
 	};
 
 	var _vars = {
 		debug:false,
+		threads:_consts.DEFAULT_THREADS,
 
 		addUrlCallback:null,
+		crawlCallback:null,
 		downloadCallback:null,
 		completeCallback:null,
 		errorCallback:null,
@@ -74,7 +76,7 @@ module.exports = function(params){
 		_crawlQueueIndex:0,
 		_downloadQueue:[], //URLs to download
 		_downloadQueueIndex:0,
-		_threads:new Array(_consts.THREADS)
+		_threads:new Array(params.threads || _consts.DEFAULT_THREADS)
 	};
 
 	var _methods = {
@@ -85,7 +87,7 @@ module.exports = function(params){
 			_instance.rootUrls.push(baseUrlNoAuth);
 			_instance.allUrls.push(new Array());
 
-			_methods._addUrl(absoluteUrlNoAuth, baseUrlNoAuth, null);
+			_methods._addUrl(absoluteUrlNoAuth, baseUrlNoAuth, null, null);
 		},
 
 		start:function(){
@@ -110,41 +112,35 @@ module.exports = function(params){
 			if (!_instance.isRunning){
 				return;
 			}
-			//Check completion
-			if (_vars._crawlQueueIndex == _vars._crawlQueue.length){
-				if (_instance.downloadCallback){
-					if (_vars._downloadQueueIndex == _vars._downloadQueue.length){
-						_methods._complete();
-						return;
-					}
-				} else {
-					_methods._complete();
-					return;
-				}
-			}
 
-			//Loop through threads and do something
-			for (var i = 0; i < _consts.THREADS; i++){
+			//Loop through threads and do something - Note this should be "_vars" because we don't want someone to change number of threads after initialization
+			var isBusy = false;
+			for (var i = 0; i < _vars.threads; i++){
 				//Thread is busy, skip
 				if (_vars._threads[i]){
+					if (!isBusy){
+						isBusy = true;
+					}
 					continue;
 				}
-				//We need to check for completion again since an eariler thread may not be complete but a later thread might be
 				if (_vars._crawlQueueIndex == _vars._crawlQueue.length){
 					if (_instance.downloadCallback){
 						if (_vars._downloadQueueIndex < _vars._downloadQueue.length){
 							//console.log("_downloadQueueIndex:", _vars._downloadQueueIndex);
-							_vars._threads[i] = _methods._download(_vars._downloadQueue[_vars._downloadQueueIndex]);
+							_vars._threads[i] = _methods._download(_vars._downloadQueue[_vars._downloadQueueIndex], i);
 							_vars._downloadQueueIndex++;
 						}
 					}
 				} else {
 					//console.log("_crawlQueueIndex:", _vars._crawlQueueIndex);
-					_vars._threads[i] = _methods._crawl(_vars._crawlQueue[_vars._crawlQueueIndex]);
+					_vars._threads[i] = _methods._crawl(_vars._crawlQueue[_vars._crawlQueueIndex], i);
 					_vars._crawlQueueIndex++;
 				}
 				//Thread has work, await and recurse
 				if (_vars._threads[i]){
+					if (!isBusy){
+						isBusy = true;
+					}
 					(async function(i){
 						try {
 							await _vars._threads[i];
@@ -160,6 +156,25 @@ module.exports = function(params){
 					})(i);
 				}
 			}
+
+			if (!isBusy){
+				_methods._checkCompletion();
+			}
+		},
+
+		_checkCompletion:function(){
+			if (_vars._crawlQueueIndex == _vars._crawlQueue.length){
+				if (_instance.downloadCallback){
+					if (_vars._downloadQueueIndex == _vars._downloadQueue.length){
+						_methods._complete();
+						return true;
+					}
+				} else {
+					_methods._complete();
+					return true;
+				}
+			}
+			return false;
 		},
 
 		_complete:function(){
@@ -171,13 +186,20 @@ module.exports = function(params){
 		},
 
 		//TODO: Add error handling
-		_crawl:function(url){
-			return new Promise(async (resolve, reject) => {
-				//console.log("CRAWLING URL:", url);
+		_crawl:function(url, threadIndex){
+			if (typeof threadIndex === typeof undefined){
+				threadIndex = null;
+			}
 
+			if (_instance.crawlCallback){
+				_instance.crawlCallback(url, threadIndex);
+			}
+
+			return new Promise(async (resolve, reject) => {
 				try {
-					var response = await _methods._download(url);
+					var response = await _methods._download(url, threadIndex);
 				} catch (error){
+					error.url = error.url || url;
 					reject(error);
 					return;
 				}
@@ -196,41 +218,53 @@ module.exports = function(params){
 				body = body.replace(/&#34;/g, '"');
 				body = body.replace(/&#39;/g, "'");
 
-				var baseUrl = _methods._getUrlBase(url);
-				switch (true){
+				try {
+					var baseUrl = _methods._getUrlBase(url);
+					switch (true){
 
-					//Response is HTML
-					case _consts.REGEX_MIME_HTML.test(contentType):
-						_methods._matchesToUrls(body.matchAll(_consts.REGEX_LINK), baseUrl, url);
-						_methods._matchesToUrls(body.matchAll(_consts.REGEX_STYLE), baseUrl, url);
-						_methods._matchesToUrls(body.matchAll(_consts.REGEX_SCRIPT), baseUrl, url);
-						_methods._matchesToUrls(body.matchAll(_consts.REGEX_IMG), baseUrl, url);
-						_methods._matchesToUrls(body.matchAll(_consts.REGEX_SOURCE_SET), baseUrl, url);
-						_methods._matchesToUrls(body.matchAll(_consts.REGEX_CSS_IMPORT), baseUrl, url);
-						_methods._matchesToUrls(body.matchAll(_consts.REGEX_CSS_RESOURCE), baseUrl, url);
-						break;
+						//Response is HTML
+						case _consts.REGEX_MIME_HTML.test(contentType):
+							_methods._matchesToUrls(body.matchAll(_consts.REGEX_LINK), baseUrl, url, threadIndex);
+							_methods._matchesToUrls(body.matchAll(_consts.REGEX_STYLE), baseUrl, url, threadIndex);
+							_methods._matchesToUrls(body.matchAll(_consts.REGEX_SCRIPT), baseUrl, url, threadIndex);
+							_methods._matchesToUrls(body.matchAll(_consts.REGEX_IMG), baseUrl, url, threadIndex);
+							_methods._matchesToUrls(body.matchAll(_consts.REGEX_SOURCE_SET), baseUrl, url, threadIndex);
+							_methods._matchesToUrls(body.matchAll(_consts.REGEX_CSS_IMPORT), baseUrl, url, threadIndex);
+							_methods._matchesToUrls(body.matchAll(_consts.REGEX_CSS_RESOURCE), baseUrl, url, threadIndex);
+							break;
 
-					//Response is CSS
-					case _consts.REGEX_MIME_CSS.test(contentType):
-						_methods._matchesToUrls(body.matchAll(_consts.REGEX_CSS_IMPORT), baseUrl, url);
-						_methods._matchesToUrls(body.matchAll(_consts.REGEX_CSS_RESOURCE), baseUrl, url);
-						break;
+						//Response is CSS
+						case _consts.REGEX_MIME_CSS.test(contentType):
+							_methods._matchesToUrls(body.matchAll(_consts.REGEX_CSS_IMPORT), baseUrl, url, threadIndex);
+							_methods._matchesToUrls(body.matchAll(_consts.REGEX_CSS_RESOURCE), baseUrl, url, threadIndex);
+							break;
 
-					//Else
-					default:
-						break;
+						//Else
+						default:
+							break;
+					}
+				} catch (error){
+					error.url = error.url || url;
+					error.fromPage = url;
+					reject(error);
+					return;
 				}
 
 				resolve();
 			});
 		},
 
-		_download:function(url){
+		_download:function(url, threadIndex){
+			if (typeof threadIndex === typeof undefined){
+				threadIndex = null;
+			}
+
 			return new Promise(async (resolve, reject) => {
 				//Get response
 				try {
 					var response = await _methods._fetchUrl(url);
 				} catch (error){
+					error.url = error.url || url;
 					reject(error);
 					return;
 				}
@@ -250,27 +284,33 @@ module.exports = function(params){
 						filePath += _consts.DEFAULT_EXTENSION;
 					}
 
-					_instance.downloadCallback(url, filePath, response.body);
+					_instance.downloadCallback(url, filePath, response.body, threadIndex);
 				}
 
 				resolve(response);
 			});
 		},
 
-		_matchesToUrls:function(matchIterator, baseUrl, currentUrl){
+		_matchesToUrls:function(matchIterator, baseUrl, currentUrl, threadIndex){
 			if (!matchIterator){
 				return;
 			}
 			var match = matchIterator.next();
 			if (match.value){
-				_methods._addUrl(match.value[1], baseUrl, currentUrl);
+				var url = match.value[1].trim();
+				try {
+					_methods._addUrl(url, baseUrl, currentUrl, threadIndex);
+				} catch (error){
+					error.url = error.url || url;
+					throw error;
+				}
 			}
 			if (!match.done){
-				_methods._matchesToUrls(matchIterator, baseUrl, currentUrl);
+				_methods._matchesToUrls(matchIterator, baseUrl, currentUrl, threadIndex);
 			}
 		},
 
-		_addUrl:function(url, baseUrl, currentUrl){
+		_addUrl:function(url, baseUrl, currentUrl, threadIndex){
 			var rootUrlsLen = _instance.rootUrls.length;
 
 			//Actions like mailto: and tel:
@@ -287,7 +327,7 @@ module.exports = function(params){
 								isAction:true,
 								isExternal:false,
 								isCrawlable:false
-							});
+							}, threadIndex);
 						}
 
 						_instance.allUrls[i].push(url);
@@ -330,7 +370,7 @@ module.exports = function(params){
 							isAction:false,
 							isExternal:true,
 							isCrawlable:false
-						});
+						}, threadIndex);
 					}
 				}
 				return;
@@ -355,7 +395,7 @@ module.exports = function(params){
 					isAction:false,
 					isExternal:false,
 					isCrawlable:isCrawlable
-				});
+				}, threadIndex);
 			}
 		},
 
@@ -447,8 +487,10 @@ module.exports = function(params){
 
 	_instance = {
 		debug:_vars.debug,
+		threads:_consts.DEFAULT_THREADS,
 
 		addUrlCallback:_vars.addUrlCallback,
+		crawlCallback:_vars.crawlCallback,
 		downloadCallback:_vars.downloadCallback,
 		completeCallback:_vars.completeCallback,
 		errorCallback:_vars.errorCallback,

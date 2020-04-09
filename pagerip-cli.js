@@ -16,13 +16,27 @@ module.exports = (function(params){
 
 		DEFAULT_OUTPUT_PATH:"./output.txt", //If not specified
 		DEFAULT_DOWNLOAD_PATH:"./download/", //If not specified
+
+		CONSOLE_UPDATE_INTERVAL:250 //ms
 	};
 
 	var _vars = {
 		outputPath:null,
 		downloadPath:null,
 
-		_pagerip:null
+		_pagerip:null,
+
+		_consoleUpdateInverval:0,
+		_consoleOutput:{
+			threads:[],
+			urlCount:0,
+			externalUrlCount:0,
+			crawlCount:0,
+			downloadCount:0,
+			errorCount:0,
+			firstUpdate:true,
+			lastError:null
+		}
 	};
 
 	var _methods = {
@@ -32,7 +46,7 @@ module.exports = (function(params){
 			//Create PageRip instance
 			_vars._pagerip = new PageRip({
 				addUrlCallback:_methods._handler_addUrl,
-				addExternalUrlCallback:_methods._handler_addExternalUrl,
+				crawlCallback:_methods._handler_crawl,
 				completeCallback:_methods._handler_complete,
 				errorCallback:_methods._handler_caught_exception
 			});
@@ -101,6 +115,8 @@ module.exports = (function(params){
 			}
 
 			try {
+				_consoleUpdateInverval = setInterval(_methods._handler_console_update, _consts.CONSOLE_UPDATE_INTERVAL);
+
 				pagerip.start();
 			} catch (error){
 				_methods._displayCommands();
@@ -109,6 +125,15 @@ module.exports = (function(params){
 		},
 
 		destroy:function(){
+			if (_vars._consoleUpdateInverval){
+				clearInterval(_vars._consoleUpdateInverval);
+			}
+
+			if (_vars._pagerip){
+				_vars._pagerip.cancel();
+				_vars._pagerip = null;
+			}
+
 			process.removeListener('uncaughtException', _methods._handler_uncaught_exception);
 		},
 
@@ -162,17 +187,28 @@ module.exports = (function(params){
 		},
 
 		_handler_caught_exception:function(error){
-			console.error("CAUGHT ERROR:\n", error);
+			_vars._consoleOutput.errorCount++;
+			_vars._consoleOutput.lastError = error;
 		},
 
-		_handler_addUrl:function(url, urlFlags){
-			if (!urlFlags.isExternal){
-				console.log("ADDED:", url);
-				console.log();
+		_handler_addUrl:function(url, urlFlags, threadIndex){
+			if (urlFlags.isExternal){
+				_vars._consoleOutput.externalUrlCount++;
+				if (threadIndex != null){
+					_vars._consoleOutput.threads[threadIndex] = `FOUND | ${url}`;
+				}
+			} else {
+				_vars._consoleOutput.urlCount++;
+				if (threadIndex != null){
+					_vars._consoleOutput.threads[threadIndex] = `ADDED | ${url}`;
+				}
 			}
 		},
 
 		_handler_complete:function(rootUrls, allUrls, externalUrls){
+			clearInterval(_vars._consoleUpdateInverval);
+			_methods._handler_console_update();
+
 			if (_instance.outputPath){
 				_methods._writeOutputFile(rootUrls, allUrls, externalUrls);
 			}
@@ -180,14 +216,22 @@ module.exports = (function(params){
 			_instance.exit();
 		},
 
-		_handler_download:function(url, filePath, contents){
+		_handler_crawl:function(url, threadIndex){
+			_vars._consoleOutput.crawlCount++;
+			if (threadIndex != null){
+				_vars._consoleOutput.threads[threadIndex] = `CRAWLING | ${url}`;
+			}
+		},
+
+		_handler_download:function(url, filePath, contents, threadIndex){
 			var fullPath = _instance.downloadPath + filePath;
-
-			console.log("DOWNLOADED URL:", url);
-			console.log("SAVING FILE:", fullPath);
-			console.log();
-
 			fsExtra.outputFile(fullPath, contents);
+
+
+			_vars._consoleOutput.downloadCount++;
+			if (threadIndex != null){
+				_vars._consoleOutput.threads[threadIndex] = `DOWNLOADED | ${url}`;
+			}
 		},
 
 		_writeOutputFile:function(rootUrls, allUrls, externalUrls){
@@ -195,6 +239,7 @@ module.exports = (function(params){
 				return;
 			}
 			//Note: Currently this writes everything to the file system at the end. However the buffer could overflow so its better to write to file system in chunks during runtime
+			console.log();
 			console.log("Writing file", _instance.outputPath);
 
 			var fileContents = allUrls.reduce((str, urlArr, index) => {
@@ -214,6 +259,48 @@ module.exports = (function(params){
 
 			fs.writeFileSync(_instance.outputPath, fileContents);
 		},
+
+		//Write latest status to console
+		_handler_console_update:function(){
+			//return;
+
+			console.clear();
+
+			console.log();
+			console.log("--- STATUS ---");
+			console.log();
+			var threadsLen = _vars._consoleOutput.threads.length;
+			for (var i = 0; i < threadsLen; i++){
+				var threadStatus = _vars._consoleOutput.threads[i];
+				if (threadStatus){
+					console.log(`thread[${i}] | ${_vars._consoleOutput.threads[i]}`);
+				} else {
+					console.log(`thread[${i}] | Empty`);
+				}
+			}
+
+			console.log();
+			console.log("--- SUMMARY ---");
+			console.log();
+			console.log("Crawled URLs:", _vars._consoleOutput.crawlCount);
+			console.log("Internal URLs:", _vars._consoleOutput.urlCount);
+			console.log("External URLs:", _vars._consoleOutput.externalUrlCount);
+			console.log("Downloaded files:", _vars._consoleOutput.downloadCount);
+			console.log("Errors:", _vars._consoleOutput.errorCount);
+
+			if (_vars._consoleOutput.lastError){
+				console.log();
+				console.log("--- LAST ERROR ---");
+				console.log();
+				if (_vars._consoleOutput.lastError.fromPage){
+					console.log("Found in source:", _vars._consoleOutput.lastError.fromPage);
+				}
+				if (_vars._consoleOutput.lastError.url){
+					console.log("Url:", _vars._consoleOutput.lastError.url);
+				}
+				console.error(_vars._consoleOutput.lastError);
+			}
+		}
 	};
 
 	_instance = {
