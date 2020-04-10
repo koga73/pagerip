@@ -36,7 +36,7 @@ Usage examples:
 npm i pagerip
 ```
 
-```
+```javascript
 const PageRip = require("pagerip");
 
 //All callbacks are optional
@@ -85,10 +85,10 @@ function errorCallback(error){
 ```
 
 ###### Public instance API
-```
+```javascript
 var pagerip = new PageRip({
 	debug:true, //Exposes private methods and constants via public instance
-	threads:10,	//Number of threads for crawl/download queues - This can ONLY be set on initialization
+	threads:10, //Number of threads for crawl/download queues - This can ONLY be set on initialization
 
 	addUrlCallback: addCallback,		//Called when a URL is added
 	crawlCallback: crawlCallback,		//Called when a URL is crawled
