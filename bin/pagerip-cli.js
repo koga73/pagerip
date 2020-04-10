@@ -5,7 +5,8 @@
 
 const fs = require("fs");
 const fsExtra = require("fs-extra");
-const PageRip = require("./pagerip.js");
+
+const PageRip = require("../pagerip.js");
 
 module.exports = (function(params){
 	var _instance = null;

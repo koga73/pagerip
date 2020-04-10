@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Crawls a website and lists or downloads all resources",
   "main": "pagerip.js",
+  "bin": {
+    "pagerip": "./bin/pagerip-cli.js"
+  },
   "scripts": {
     "test": "mocha tests/test.js"
   },
@@ -22,7 +25,8 @@
     "crawler",
     "wget",
     "download",
-    "clone"
+    "clone",
+    "list"
   ],
   "dependencies": {
     "fs-extra": "^9.0.0",
