@@ -84,7 +84,7 @@ function errorCallback(error){
 }
 ```
 
-###### Public instance API
+#### Full API
 ```javascript
 var pagerip = new PageRip({
 	debug:true, //Exposes private methods and constants via public instance
